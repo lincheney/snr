@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+
+import os
+import re
+import sys
+import shlex
+import subprocess
+import argparse
+
+SEP = '/'
+CHARS = rf'(?:\\.|\[.+\]|[^{SEP}])*'
+PATTERN_REGEX = re.compile(rf's/({CHARS})(?:{SEP}({CHARS})(?:{SEP}(.*))?)?')
+def rg_command(regex, replacement, glob, *args):
+    command = ['rg', '-S']
+    if regex:
+        regex = re.sub(r'\\.', lambda m: SEP if m.group(0) == '\\'+SEP else m.group(0), regex)
+        if regex == '$':
+            command += ['-U', '-e', '\\n|$']
+        else:
+            command += ['-e', regex]
+
+    if replacement is not None:
+        if regex == '$':
+            replacement += '${0}'
+        command += ['-r', replacement]
+
+    if glob:
+        negate = ''
+        if glob.startswith('!'):
+            negate = '!'
+            glob = glob[1:]
+        command += ['--iglob', f'{negate}*{glob}*', '--iglob', f'{negate}**/*{glob}*/**']
+
+    return command + list(args)
+
+def shell_quote(*args):
+    return ' '.join(map(shlex.quote, args))
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('action', choices=['rename', 'replace'])
+    parser.add_argument('-e', '--expression')
+    parser.add_argument('--preview', action='store_true')
+    parser.add_argument('files', nargs='*')
+    args = parser.parse_intermixed_args()
+
+    if args.preview:
+        regex, replacement, glob = re.fullmatch(PATTERN_REGEX, args.expression or '').groups()
+
+        if args.action == 'replace' and regex:
+            command = rg_command(regex, replacement, glob, '--color=always', '--line-number', '--sort=path', '--', *args.files)
+            os.execvp(command[0], command)
+
+        elif args.action == 'rename':
+            command = rg_command(None, None, glob, '--files', '--sort=path', '--', *args.files)
+            if not regex:
+                filter = ['sed', 's/^/\x1b[90m/; s/$/\x1b[0m/'] # grey them out
+            else:
+                filter = rg_command(regex, replacement, None, '--color=always')
+
+            with subprocess.Popen(command, stdout=subprocess.PIPE) as proc:
+                subprocess.run(filter, stdin=proc.stdout)
+
+        return
+
+    if args.expression is None:
+        header = f'\nUsage: {SEP}regex{SEP}replacement{SEP}filename_glob'
+        preview = shell_quote(sys.executable, sys.argv[0], args.action) + ' --preview --expression=s/{q} -- ' + shell_quote(*args.files)
+        command = [
+            'fzf',
+            '--phony',
+            '--info=hidden',
+            '--preview-window=bottom:99%:wrap',
+            '--layout=reverse',
+            f'--prompt=> s{SEP}',
+            '--print-query',
+            '--pointer= ', '--color=bg+:-1',
+            '--header='+header,
+            '--preview='+preview,
+        ]
+        args.expression = 's' + SEP + subprocess.run(command, input='\n', stdout=subprocess.PIPE, text=True).stdout.rstrip('\n')
+
+    regex, replacement, glob = re.fullmatch(PATTERN_REGEX, args.expression).groups()
+    if not regex or replacement is None:
+        return
+    print(shell_quote(parser.prog, args.action, '-e', args.expression), file=sys.stderr)
+
+    if args.action == 'replace':
+        command = rg_command(regex, replacement, glob, '--passthru')
+        paths = subprocess.run(command+['-l', '--'] + args.files, capture_output=True, text=True).stdout.splitlines()
+        if not paths:
+            return
+        print(file=sys.stderr)
+        for path in paths:
+            print('Modifying', path, file=sys.stderr)
+
+        if not paths:
+            return
+        if input('\nAre you sure (y/n)? ').lower().strip() not in ('y', 'yes'):
+            return 130
+        for path in paths:
+            content = subprocess.check_output(command + ['--', path])
+            with open(path, 'wb') as file:
+                file.write(content)
+
+    elif args.action == 'rename':
+        command = rg_command(None, None, glob, '--files', '--', *args.files)
+        old_paths = subprocess.run(command, capture_output=True, text=True).stdout.splitlines()
+
+        command = rg_command(regex, replacement, None, '--passthru')
+        new_paths = subprocess.run(command, capture_output=True, text=True, input='\n'.join(old_paths)).stdout.splitlines()
+
+        paths = [(old, new) for old, new in zip(old_paths, new_paths) if old != new]
+        if not paths:
+            return
+        print(file=sys.stderr)
+        for old, new in paths:
+            print('Renaming', repr(old), '\t->\t', repr(new), file=sys.stderr)
+            if os.path.exists(new):
+                raise FileExistsError(new)
+
+        if input('\nAre you sure (y/n)? ').lower().strip() not in ('y', 'yes'):
+            return 130
+        for old, new in paths:
+            os.makedirs(os.path.dirname(new) or '.', exist_ok=True)
+            if os.path.exists(new):
+                raise FileExistsError(new)
+            os.rename(old, new)
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except (KeyboardInterrupt, BrokenPipeError):
+        pass
