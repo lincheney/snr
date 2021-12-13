@@ -21,6 +21,7 @@ def rg_command(regex, replacement, glob, *args):
 
     if replacement is not None:
         replacement = re.sub(r'\\.', lambda m: SEP if m.group(0) == '\\'+SEP else m.group(0), replacement)
+        replacement = replacement.encode('utf8').decode('unicode_escape')
         if regex == '$':
             replacement += '${0}'
         command += ['-r', replacement]
