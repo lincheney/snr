@@ -41,9 +41,12 @@ def shell_quote(*args):
 def main():
     import argparse
     parser = argparse.ArgumentParser()
+    parser.set_defaults(rg_args=[])
     parser.add_argument('action', choices=['rename', 'replace'])
     parser.add_argument('-e', '--expression')
     parser.add_argument('--preview', action='store_true')
+    parser.add_argument('-P', '--pcre2', dest='rg_args', const='--pcre2', action='append_const')
+    parser.add_argument('-U', '--multiline', dest='rg_args', const='--multiline', action='append_const')
     parser.add_argument('files', nargs='*')
     args = parser.parse_intermixed_args()
 
@@ -51,15 +54,15 @@ def main():
         regex, replacement, glob = re.fullmatch(PATTERN_REGEX, args.expression or '').groups()
 
         if args.action == 'replace' and regex:
-            command = rg_command(regex, replacement, glob, '--color=always', '--line-number', '--sort=path', '--', *args.files)
+            command = rg_command(regex, replacement, glob, '--color=always', '--line-number', '--sort=path', *args.rg_args, '--', *args.files)
             os.execvp(command[0], command)
 
         elif args.action == 'rename':
-            command = rg_command(None, None, glob, '--files', '--sort=path', '--', *args.files)
+            command = rg_command(None, None, glob, '--files', '--sort=path', *args.rg_args, '--', *args.files)
             if not regex:
                 filter = ['sed', 's/^/\x1b[90m/; s/$/\x1b[0m/'] # grey them out
             else:
-                filter = rg_command(regex, replacement, None, '--color=always')
+                filter = rg_command(regex, replacement, None, '--color=always', *args.rg_args)
 
             with subprocess.Popen(command, stdout=subprocess.PIPE) as proc:
                 subprocess.run(filter, stdin=proc.stdout)
@@ -89,7 +92,7 @@ def main():
     print(shell_quote(parser.prog, args.action, '-e', args.expression), file=sys.stderr)
 
     if args.action == 'replace':
-        command = rg_command(regex, replacement, glob, '--passthru')
+        command = rg_command(regex, replacement, glob, '--passthru', *args.rg_args)
         paths = subprocess.run(command+['-l', '--'] + args.files, capture_output=True, text=True).stdout.splitlines()
         if not paths:
             return
@@ -107,10 +110,10 @@ def main():
                 file.write(content)
 
     elif args.action == 'rename':
-        command = rg_command(None, None, glob, '--files', '--', *args.files)
+        command = rg_command(None, None, glob, '--files', *args.rg_args, '--', *args.files)
         old_paths = subprocess.run(command, capture_output=True, text=True).stdout.splitlines()
 
-        command = rg_command(regex, replacement, None, '--passthru')
+        command = rg_command(regex, replacement, None, '--passthru', *args.rg_args)
         new_paths = subprocess.run(command, capture_output=True, text=True, input='\n'.join(old_paths)).stdout.splitlines()
 
         paths = [(old, new) for old, new in zip(old_paths, new_paths) if old != new]
