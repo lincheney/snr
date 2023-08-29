@@ -5,7 +5,6 @@ import re
 import sys
 import shlex
 import subprocess
-import argparse
 
 SEP = '/'
 CHARS = rf'(?:\\.|\[.+\]|[^{SEP}])*'
@@ -19,12 +18,15 @@ def rg_command(regex, replacement, glob, *args):
         else:
             command += ['-e', regex]
 
-    if replacement is not None:
+    if replacement is None:
+        command += ['--colors', 'match:fg:red']
+    else:
         replacement = re.sub(r'\\.', lambda m: SEP if m.group(0) == '\\'+SEP else m.group(0), replacement)
         replacement = replacement.encode('utf8').decode('unicode_escape')
         if regex == '$':
             replacement += '${0}'
         command += ['-r', replacement]
+        command += ['--colors', 'match:fg:green']
 
     if glob:
         negate = ''
@@ -60,7 +62,7 @@ def main():
         elif args.action == 'rename':
             command = rg_command(None, None, glob, '--files', '--sort=path', *args.rg_args, '--', *args.files)
             if not regex:
-                filter = ['sed', 's/^/\x1b[90m/; s/$/\x1b[0m/'] # grey them out
+                filter = ['sed', 's/^/\x1b[37m/; s/$/\x1b[0m/'] # grey them out
             else:
                 filter = rg_command(regex, replacement, None, '--color=always', *args.rg_args)
 
@@ -78,11 +80,11 @@ def main():
             '--info=hidden',
             '--preview-window=bottom:99%:wrap',
             '--layout=reverse',
-            f'--prompt=> s{SEP}',
+            '--prompt=> s'+SEP,
             '--print-query',
             '--pointer= ', '--color=bg+:-1',
             '--header='+header,
-            '--preview='+preview,
+            '--preview=2> >(sed "s/.*/\x1b[2;37m&\x1b[0m/") '+preview,
         ]
         args.expression = 's' + SEP + subprocess.run(command, input='\n', stdout=subprocess.PIPE, text=True).stdout.rstrip('\n')
 
@@ -93,21 +95,40 @@ def main():
 
     if args.action == 'replace':
         command = rg_command(regex, replacement, glob, '--passthru', *args.rg_args)
-        paths = subprocess.run(command+['-l', '--'] + args.files, capture_output=True, text=True).stdout.splitlines()
+        paths = subprocess.run(command+['-l', '--'] + args.files, stdin=subprocess.DEVNULL, capture_output=True, text=True).stdout.splitlines()
         if not paths:
             return
         print(file=sys.stderr)
-        for path in paths:
-            print('Modifying', path, file=sys.stderr)
-
         if not paths:
             return
-        if input('\nAre you sure (y/n)? ').lower().strip() not in ('y', 'yes'):
-            return 130
-        for path in paths:
-            content = subprocess.check_output(command + ['--', path])
-            with open(path, 'wb') as file:
-                file.write(content)
+
+        diff_filter = None
+        while True:
+            if diff_filter is None:
+                for path in paths:
+                    print('Modifying', path, file=sys.stderr)
+            else:
+                script = f'''
+                while read -d "" file; do
+                    echo
+                    diff --unified=0 -- "$file" <({shell_quote(*command)} -- "$file")
+                done {diff_filter}
+                '''
+                subprocess.run(script, input='\0'.join(paths)+'\0', text=True, shell=True)
+                print('\x1b[0m', end='', file=sys.stderr)
+
+            response = input('\nAre you sure (y/n/diff)? ').lower().strip()
+            if response in ('d', 'diff'):
+                diff_filter = subprocess.run(['git', 'config', '--get', 'interactive.diffFilter'], text=True, capture_output=True).stdout
+                diff_filter = ' | '+diff_filter.rstrip('\n') if diff_filter else ''
+            elif response in ('y', 'yes'):
+                for path in paths:
+                    content = subprocess.check_output(command + ['--', path])
+                    with open(path, 'wb') as file:
+                        file.write(content)
+                break
+            else:
+                return 130
 
     elif args.action == 'rename':
         command = rg_command(None, None, glob, '--files', *args.rg_args, '--', *args.files)
@@ -136,5 +157,5 @@ def main():
 if __name__ == '__main__':
     try:
         sys.exit(main())
-    except (KeyboardInterrupt, BrokenPipeError):
+    except (KeyboardInterrupt, BrokenPipeError, EOFError):
         pass
