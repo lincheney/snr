@@ -17,3 +17,7 @@ To replace text in files: `./snr replace`
 
 Regular expressions follow the syntax that `rg` uses
 e.g. `$1` rather than `\1` for groups.
+
+## Demo
+
+![snr](https://github.com/lincheney/snr/assets/1336117/2358f19d-d5c6-4945-b274-6a417e0156eb)
