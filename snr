@@ -111,10 +111,10 @@ def main():
                 script = f'''
                 while read -d "" file; do
                     echo
-                    diff --unified=0 -- "$file" <({shell_quote(*command)} -- "$file")
+                    ({shell_quote(*command)} -- "$file") | diff --unified=0 -- "$file" -
                 done {diff_filter}
                 '''
-                subprocess.run(script, input='\0'.join(paths)+'\0', text=True, shell=True)
+                subprocess.run(['sh', '-c', script], input='\0'.join(paths)+'\0', text=True)
                 print('\x1b[0m', end='', file=sys.stderr)
 
             response = input('\nAre you sure (y/n/diff)? ').lower().strip()
