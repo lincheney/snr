@@ -73,7 +73,7 @@ def main():
 
     if args.expression is None:
         header = f'\nUsage: {SEP}regex{SEP}replacement{SEP}filename_glob'
-        preview = shell_quote(sys.executable, sys.argv[0], args.action) + ' --preview --expression=s/{q} -- ' + shell_quote(*args.files)
+        preview = shell_quote(sys.executable, sys.argv[0], args.action, *args.rg_args) + ' --preview --expression=s/{q} -- ' + shell_quote(*args.files)
         command = [
             'fzf',
             '--phony',
