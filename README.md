@@ -15,6 +15,8 @@ To rename files: `./snr rename`
 
 To replace text in files: `./snr replace`
 
+To rewrite symlinks: `./snr relink`
+
 Regular expressions follow the syntax that `rg` uses
 e.g. `$1` rather than `\1` for groups.
 
