@@ -190,8 +190,6 @@ def main():
         print(file=sys.stderr)
         for link, old, new in paths:
             print('Relinking', repr(link), ':\t', repr(old), '\t->\t', repr(new), file=sys.stderr, sep='')
-            if os.path.exists(new):
-                raise FileExistsError(new)
 
         if input('\nAre you sure (y/n)? ').lower().strip() not in ('y', 'yes'):
             return 130
